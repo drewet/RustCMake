@@ -63,17 +63,19 @@ function(get_rust_deps local_root_file out_var)
 	if(OPT_COMPILE)
 		file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${OPT_DESTINATION}")
 		set(flags --out-dir "${CMAKE_CURRENT_BINARY_DIR}/${OPT_DESTINATION}")
-		message(STATUS "Compiling and getting Rust dependency info for crate root ${local_root_file}")
-	else()
-		set(flags --no-analysis)
-		message(STATUS "Getting Rust dependency info for crate root ${local_root_file}")
+		message(STATUS "Compiling Rust dependency info for crate root ${local_root_file}")
+		# XXX: It'd be nice if this wasn't a separate operation (need to handle the dep file location being different, or rewrite this macro thing)
+		execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} ${flags} "${root_file}")
 	endif()
 
-	execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} ${flags} --dep-info "${dep_dir}/deps" "${root_file}")
+	set(flags "-Zno-analysis")
+	message(STATUS "Getting Rust dependency info for crate root ${local_root_file}")
+
+	execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} ${flags} --emit dep-info -o "${dep_dir}/deps" "${root_file}")
 
 	# Read and parse the dependency information
-	file(READ "${dep_dir}/deps" crate_deps)
-	file(REMOVE "${dep_dir}/deps")
+	file(READ "${dep_dir}/deps.d" crate_deps)
+	file(REMOVE "${dep_dir}/deps.d")
 	string(REGEX REPLACE ".*: (.*)" "\\1" crate_deps "${crate_deps}")
 	string(STRIP "${crate_deps}" crate_deps)
 	string(REPLACE " " ";" crate_deps "${crate_deps}")
@@ -128,7 +130,7 @@ function(rust_crate local_root_file)
 
 	set(root_file "${CMAKE_CURRENT_SOURCE_DIR}/${local_root_file}")
 
-	execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} --print-file-name "${root_file}"
+	execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} --print file-names "${root_file}"
 	                OUTPUT_VARIABLE rel_crate_filenames
 	                OUTPUT_STRIP_TRAILING_WHITESPACE)
 
@@ -244,7 +246,7 @@ function(rust_doc local_root_file)
 
 	set(root_file "${CMAKE_CURRENT_SOURCE_DIR}/${local_root_file}")
 
-	execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} --print-crate-name "${root_file}"
+	execute_process(COMMAND ${RUSTC_EXECUTABLE} ${RUSTC_FLAGS} ${OPT_OTHER_RUSTC_FLAGS} --print crate-name "${root_file}"
 	                OUTPUT_VARIABLE crate_name
 	                OUTPUT_STRIP_TRAILING_WHITESPACE)
 
@@ -310,4 +312,43 @@ function(rust_doc_auto local_root_file)
 	         OTHER_RUSTDOC_FLAGS ${OPT_OTHER_RUSTDOC_FLAGS})
 	set("${OPT_TARGET_NAME}_ARTIFACTS" "${${OPT_TARGET_NAME}_ARTIFACTS}" PARENT_SCOPE)
 	set("${OPT_TARGET_NAME}_FULL_TARGET" "${${OPT_TARGET_NAME}_FULL_TARGET}" PARENT_SCOPE)
+endfunction()
+
+# Creates a dummy cargo project named ${name} to fetch crates.io dependencies.
+# The package will be created in the ${CMAKE_CURRENT_BINARY_DIR}. Typically you
+# would then pass "-L ${CMAKE_CURRENT_BINARY_DIR}/target/debug/deps" to rustc so
+# it can pick up the dependencies.
+#
+# Optional arguments:
+#
+# OTHER_CARGO_FLAGS - Flags to pass to cargo.
+# PACKAGE_NAMES - List of package names to fetch.
+# PACKAGE_VERSIONS - List of package versions to fetch.
+function(cargo_dependency name)
+	cmake_parse_arguments("OPT" "" "" "OTHER_CARGO_FLAGS;PACKAGE_NAMES;PACKAGE_VERSIONS" ${ARGN})
+
+	list(LENGTH OPT_PACKAGE_NAMES num_packages)
+	list(LENGTH OPT_PACKAGE_VERSIONS num_versions)
+	if(NOT ${num_packages} EQUAL ${num_versions})
+		message(FATAL_ERROR "Number of cargo packages doesn't match the number of cargo versions.")
+	endif()
+
+	set(cargo_dependency_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}")
+	file(MAKE_DIRECTORY "${cargo_dependency_dir}")
+	file(MAKE_DIRECTORY "${cargo_dependency_dir}/src")
+
+	set(CARGO_TOML [package] \n name = \"cargo_deps_fetcher\" \n version = \"0.0.0\" \n authors = [\"none\"] \n)
+
+	math(EXPR num_packages "${num_packages} - 1")
+	foreach(pkg_idx RANGE 0 ${num_packages})
+		list(GET OPT_PACKAGE_NAMES ${pkg_idx} pkg_name)
+		list(GET OPT_PACKAGE_VERSIONS ${pkg_idx} pkg_version)
+		set(CARGO_TOML ${CARGO_TOML} \n [dependencies.${pkg_name}] \n version = \"${pkg_version}\" \n)
+	endforeach()
+
+	file(WRITE "${cargo_dependency_dir}/Cargo.toml" ${CARGO_TOML})
+	file(WRITE "${cargo_dependency_dir}/src/lib.rs" "")
+
+	execute_process(COMMAND ${CARGO_EXECUTABLE} build ${CARGO_FLAGS} ${OPT_OTHER_CARGO_FLAGS}
+	                WORKING_DIRECTORY ${cargo_dependency_dir})
 endfunction()

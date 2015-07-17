@@ -19,15 +19,7 @@
 #    3. This notice may not be removed or altered from any source
 #    distribution.
 
-find_program(RUSTC_EXECUTABLE rustc)
+find_program(CARGO_EXECUTABLE cargo)
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(rustc DEFAULT_MSG RUSTC_EXECUTABLE)
-mark_as_advanced(RUSTC_EXECUTABLE)
-
-execute_process(COMMAND ${RUSTC_EXECUTABLE} -Vv
-                OUTPUT_VARIABLE RUSTC_TARGET_TRIPLE
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
-string(REGEX MATCH "host:[ \t](.*)\n" RUSTC_TARGET_TRIPLE "${RUSTC_TARGET_TRIPLE}")
-string(REGEX REPLACE "host:[ \t](.*)\n" "\\1" RUSTC_TARGET_TRIPLE "${RUSTC_TARGET_TRIPLE}")
-set(RUSTC_TARGET_TRIPLE "${RUSTC_TARGET_TRIPLE}" CACHE STRING "Target triple you can pass to rustc (not passed by default)")
-mark_as_advanced(RUSTC_TARGET_TRIPLE)
+find_package_handle_standard_args(cargo DEFAULT_MSG CARGO_EXECUTABLE)
+mark_as_advanced(CARGO_EXECUTABLE)
